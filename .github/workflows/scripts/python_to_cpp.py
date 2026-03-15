@@ -47,11 +47,28 @@ _SKILL_URL = (
     ".github/workflows/scripts/python_to_cpp_skill.md"
 )
 
+_MATRIX_SKILL_URL = (
+    "https://raw.githubusercontent.com/"
+    "Modeling-Coding-Automation-Project/MCAP_actions/main/"
+    ".github/workflows/scripts/python_matrix_to_cpp_skill.md"
+)
+
 
 def _load_skill() -> str:
     """Return the contents of python_to_cpp_skill.md fetched from GitHub."""
     with urllib.request.urlopen(_SKILL_URL) as response:
         return response.read().decode("utf-8")
+
+
+def _load_matrix_skill() -> str:
+    """Return the contents of python_matrix_to_cpp_skill.md fetched from GitHub."""
+    with urllib.request.urlopen(_MATRIX_SKILL_URL) as response:
+        return response.read().decode("utf-8")
+
+
+def _uses_numpy(py_content: str) -> bool:
+    """Return True if the Python source contains a numpy import."""
+    return bool(re.search(r'^\s*import\s+numpy|^\s*from\s+numpy\s+import', py_content, re.MULTILINE))
 
 # ============================================================
 # Subcommand implementations
@@ -162,7 +179,11 @@ def cmd_prompt(args: argparse.Namespace) -> None:
 
     suffix = _FILE_TYPE_SUFFIX_DIFF[args.file_type] if is_diff_mode else _FILE_TYPE_SUFFIX_FULL[args.file_type]
 
-    sys.stdout.write(_load_skill() + "\n\n" + py_content +
+    skill = _load_skill()
+    if _uses_numpy(py_content):
+        skill += "\n\n" + _load_matrix_skill()
+
+    sys.stdout.write(skill + "\n\n" + py_content +
                      already_generated + py_diff_section + "\n\n" + suffix)
 
 
