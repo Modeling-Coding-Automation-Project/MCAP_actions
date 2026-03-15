@@ -1,0 +1,184 @@
+name: Python to C++ Code Generation
+
+on:
+  push:
+    branches:
+      - feature/**
+    paths:
+      - 'source/**/*.py'
+  workflow_call:
+    inputs:
+      ai_model:
+        description: 'AI model to use for code generation (e.g. gpt-5-mini, claude-sonnet-4.6). Defaults to the value set in python_to_cpp.py.'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      COPILOT_GITHUB_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  generate-cpp:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: python-to-cpp-generation
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Get changed Python files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            source/**/*.py
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+
+      - name: Install Copilot CLI
+        run: npm install -g @github/copilot
+
+      - name: Download scripts from MCAP_actions
+        run: |
+          curl -fsSL \
+            "https://raw.githubusercontent.com/Modeling-Coding-Automation-Project/MCAP_actions/main/.github/workflows/scripts/python_to_cpp.py" \
+            -o /tmp/python_to_cpp.py
+
+      - name: Create branch for generated C++ code
+        id: create-branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          SCRIPT="/tmp/python_to_cpp.py"
+          CURRENT_BRANCH="${{ github.ref_name }}"
+          BRANCH_NAME=$(python3 "$SCRIPT" branch-name "$CURRENT_BRANCH")
+
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" > /dev/null 2>&1; then
+            # Branch already exists remotely: fetch and check it out at its latest commit
+            git fetch origin "$BRANCH_NAME"
+            git checkout "$BRANCH_NAME"
+            git pull origin "$BRANCH_NAME"
+            # Merge the triggering branch into the cpp_gen branch before generating code
+            if ! git merge "$CURRENT_BRANCH" --no-edit; then
+              echo "::error::Merge conflict detected between $CURRENT_BRANCH and $BRANCH_NAME. Resolve conflicts manually."
+              git merge --abort
+              exit 1
+            fi
+            echo "branch_exists=true" >> $GITHUB_OUTPUT
+          else
+            # Branch does not exist yet: create it from the current HEAD
+            git checkout -b "$BRANCH_NAME"
+            echo "branch_exists=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
+          echo "current_branch=$CURRENT_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Generate C++ code using Copilot
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          CURRENT_BRANCH: ${{ steps.create-branch.outputs.current_branch }}
+          AI_MODEL_OVERRIDE: ${{ inputs.ai_model }}
+        run: |
+          set -eo pipefail
+          SCRIPT="/tmp/python_to_cpp.py"
+          COPILOT_MODEL=$(python3 "$SCRIPT" model)
+
+          # Bring the changed Python files from the triggering branch so that
+          # they are available on the cpp_gen branch (which may not have them
+          # or may have an older version).
+          for py_file in $CHANGED_FILES; do
+            git checkout "$CURRENT_BRANCH" -- "$py_file"
+          done
+
+          for py_file in $CHANGED_FILES; do
+            echo "Processing: $py_file"
+            base_name=$(basename "$py_file" .py)
+            dir_name=$(dirname "$py_file")
+
+            HPP_FILE="${dir_name}/${base_name}.hpp"
+            CPP_FILE="${dir_name}/${base_name}.cpp"
+            SIL_FILE="${dir_name}/${base_name}_SIL.cpp"
+
+            # Determine whether to use diff-based (incremental) update mode.
+            # Conditions:
+            #   1. The .hpp already exists (C++ was previously generated for this file).
+            #   2. ORIG_HEAD is available (set by git after a merge), meaning the
+            #      cpp_gen branch existed before and was merged with the feature branch.
+            #   3. The git diff between ORIG_HEAD and the current working tree is non-empty.
+            PY_DIFF_ARGS=""
+            if [ -f "$HPP_FILE" ] && git rev-parse ORIG_HEAD > /dev/null 2>&1; then
+              git diff ORIG_HEAD -- "$py_file" > /tmp/py_diff.txt 2>/dev/null || true
+              if [ -s /tmp/py_diff.txt ]; then
+                PY_DIFF_ARGS="--py-diff-file /tmp/py_diff.txt"
+                echo "Diff-based update mode enabled for: $py_file"
+              fi
+            fi
+
+            # Generate .hpp header file.
+            # Pass existing .hpp (if any) so the AI can use it as a basis.
+            HPP_EXISTING_ARGS=""
+            if [ -f "$HPP_FILE" ]; then HPP_EXISTING_ARGS="--hpp-file $HPP_FILE"; fi
+            python3 "$SCRIPT" prompt "$py_file" hpp $HPP_EXISTING_ARGS $PY_DIFF_ARGS > /tmp/prompt_hpp.txt
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_hpp.txt)" | python3 "$SCRIPT" filter-cpp > "$HPP_FILE"
+
+            # Generate .cpp source file (informed by the newly generated .hpp).
+            # Also pass the existing .cpp (if any) so the AI can update only changed parts.
+            CPP_EXISTING_ARGS=""
+            if [ -f "$CPP_FILE" ]; then CPP_EXISTING_ARGS="--cpp-file $CPP_FILE"; fi
+            python3 "$SCRIPT" prompt "$py_file" cpp \
+              --hpp-file "$HPP_FILE" $CPP_EXISTING_ARGS $PY_DIFF_ARGS > /tmp/prompt_cpp.txt
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_cpp.txt)" | python3 "$SCRIPT" filter-cpp > "$CPP_FILE"
+
+            # Generate _SIL.cpp Pybind11 file (informed by the newly generated .hpp and .cpp)
+            python3 "$SCRIPT" prompt "$py_file" sil \
+              --hpp-file "$HPP_FILE" \
+              --cpp-file "$CPP_FILE" $PY_DIFF_ARGS > /tmp/prompt_sil.txt
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_sil.txt)" | python3 "$SCRIPT" filter-cpp > "$SIL_FILE"
+
+            echo "Generated: $HPP_FILE"
+            echo "Generated: $CPP_FILE"
+            echo "Generated: $SIL_FILE"
+          done
+
+      - name: Commit generated C++ files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add source/
+          git diff --staged --quiet || git commit -m "feat: C++ code generation (from Python classes)"
+          git push origin "${{ steps.create-branch.outputs.branch_name }}"
+
+      - name: Create Pull Request and request review
+        if: steps.create-branch.outputs.branch_exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          PR_BRANCH: ${{ steps.create-branch.outputs.branch_name }}
+          PR_REVIEWER: ${{ github.actor }}
+        run: |
+          SCRIPT="/tmp/python_to_cpp.py"
+          python3 "$SCRIPT" pr-body $CHANGED_FILES > /tmp/pr_body.md
+
+          gh pr create \
+            --title "C++ code generation ($(date +'%Y/%m/%d %H:%M'))" \
+            --body-file /tmp/pr_body.md \
+            --base "${{ github.ref_name }}" \
+            --head "$PR_BRANCH" \
+            --reviewer "$PR_REVIEWER"
