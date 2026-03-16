@@ -103,6 +103,7 @@ _FILE_TYPE_SUFFIX_FULL = {
     ),
     "cpp": (
         "Now, generate ONLY the .cpp implementation file for the Python code above.\n"
+        "Write only the implementation of the member functions declared in the .hpp header, and any necessary includes or helper functions.\n"
         "Do NOT include the .hpp header or the _SIL.cpp file — output the implementation file only.\n"
         + _COMMON_SUFFIX
     ),
