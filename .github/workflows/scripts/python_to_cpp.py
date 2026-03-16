@@ -38,15 +38,27 @@ AI_MODEL = os.environ.get("AI_MODEL_OVERRIDE") or _AI_MODEL_DEFAULT
 # Prompts
 # ============================================================
 
-# The shared prompt is fetched from python_to_cpp_skill.md in the
-# MCAP_actions repository.  Edit that file to customise the prompt
+# The per-file-type prompts are fetched from python_to_cpp_skill_{hpp,cpp,sil}.md
+# in the MCAP_actions repository.  Edit those files to customise the prompt
 # without touching workflow YAML or this script.
 
-_SKILL_URL = (
-    "https://raw.githubusercontent.com/"
-    "Modeling-Coding-Automation-Project/MCAP_actions/main/"
-    ".github/workflows/scripts/python_to_cpp_skill.md"
-)
+_SKILL_URLS = {
+    "hpp": (
+        "https://raw.githubusercontent.com/"
+        "Modeling-Coding-Automation-Project/MCAP_actions/main/"
+        ".github/workflows/scripts/python_to_cpp_skill_hpp.md"
+    ),
+    "cpp": (
+        "https://raw.githubusercontent.com/"
+        "Modeling-Coding-Automation-Project/MCAP_actions/main/"
+        ".github/workflows/scripts/python_to_cpp_skill_cpp.md"
+    ),
+    "sil": (
+        "https://raw.githubusercontent.com/"
+        "Modeling-Coding-Automation-Project/MCAP_actions/main/"
+        ".github/workflows/scripts/python_to_cpp_skill_sil.md"
+    ),
+}
 
 _MATRIX_SKILL_URL = (
     "https://raw.githubusercontent.com/"
@@ -55,9 +67,9 @@ _MATRIX_SKILL_URL = (
 )
 
 
-def _load_skill() -> str:
-    """Return the contents of python_to_cpp_skill.md fetched from GitHub."""
-    with urllib.request.urlopen(_SKILL_URL) as response:
+def _load_skill(file_type: str) -> str:
+    """Return the contents of the file-type-specific skill .md fetched from GitHub."""
+    with urllib.request.urlopen(_SKILL_URLS[file_type]) as response:
         return response.read().decode("utf-8")
 
 
@@ -201,7 +213,7 @@ def cmd_prompt(args: argparse.Namespace) -> None:
 
     suffix = _FILE_TYPE_SUFFIX_DIFF[args.file_type] if is_diff_mode else _FILE_TYPE_SUFFIX_FULL[args.file_type]
 
-    skill = _load_skill()
+    skill = _load_skill(args.file_type)
     if _uses_numpy(py_content):
         skill += "\n\n" + _load_matrix_skill()
 

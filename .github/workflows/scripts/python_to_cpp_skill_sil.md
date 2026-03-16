@@ -1,23 +1,20 @@
 ---
-name: convert_python_to_cpp
-description: Python to C++ code conversion agent.
+name: convert_python_to_cpp_sil
+description: Python to C++ Pybind11 Software-In-the-Loop (_SIL.cpp) conversion agent.
 argument-hint: a task to implement.
 ---
 
 If there have been changes or additions to the Python code under the "/source" directory between the most recent commit and the commit immediately preceding it, please perform the following steps.
 
-Convert the modified Python code to C++.
-  - For example, if there is a file named "pid_controller.py", create files named "pid_controller.cpp" and "pid_controller.hpp" in the same directory.
-  - If "pid_controller.cpp" and "pid_controller.hpp" already exist, verify their contents and edit them so that they provide the same functionality as "pid_controller.py".
-  - When converting, create C++ classes and functions that directly mirror the class and function structures of the Python code.
+Convert the modified Python code to a Pybind11 Software-In-the-Loop file (_SIL.cpp).
+  - For example, if there is a file named "pid_controller.py", create a file named "pid_controller_SIL.cpp" in the same directory.
+  - "pid_controller_SIL.cpp" wraps ONLY the methods (member functions) that are explicitly defined in the Python class. Do NOT create additional convenience functions such as getters, setters, or reset functions that do not exist as methods in the Python source code. The SIL file should have an `initialize` function and one wrapper function per method defined in the Python class.
+  - Refer to the "*_SIL.cpp" files in other directories for guidance on coding style.
+  - If "pid_controller_SIL.cpp" already exists, review its contents and modify "pid_controller_SIL.cpp" so that it has the same interface as the class and content in "pid_controller.py". Remove any functions that do not correspond to methods in the Python class.
   - With embedded implementation in mind, keep the following in mind:
     - Do not use dynamic memory allocation.
     - Do not use while loops.
   - Write the C++ code so that it can be built with C++11.
-  - Once "pid_controller.cpp" and "pid_controller.hpp" are complete, create "pid_controller_SIL.cpp" in the same directory. "pid_controller_SIL.cpp" is used for Software-In-the-Loop simulation with Pybind11.
-    - "pid_controller_SIL.cpp" wraps ONLY the methods (member functions) that are explicitly defined in the Python class. Do NOT create additional convenience functions such as getters, setters, or reset functions that do not exist as methods in the Python source code. The SIL file should have an `initialize` function and one wrapper function per method defined in the Python class.
-    - Refer to the "*_SIL.cpp" files in other directories for guidance on coding style.
-    - If "pid_controller_SIL.cpp" already exists, review its contents and modify "pid_controller_SIL.cpp" so that it has the same interface as the class and content in "pid_controller.py". Remove any functions that do not correspond to methods in the Python class.
 
 If you cannot find any other "*_SIL.cpp" files to use as a reference, use the following code as a guide.
 
