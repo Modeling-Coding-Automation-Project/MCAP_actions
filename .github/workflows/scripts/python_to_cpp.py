@@ -14,6 +14,7 @@ Usage (called from the workflow YAML):
 """
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -85,27 +86,39 @@ def cmd_model(args: argparse.Namespace) -> None:
     print(AI_MODEL)
 
 
+_COMMON_SUFFIX = (
+    "Output ONLY a JSON object with the following structure (no markdown fences, no preamble, no explanations):\n"
+    '{"modified": true, "code": "<complete SIL file content>"}\n'
+    'In the JSON string value of "code", represent newlines as \\n and double quotes as \\".\n'
+    "Do not output anything other than the JSON object."
+)
+
+
 # Prompts for full (from-scratch) generation
 _FILE_TYPE_SUFFIX_FULL = {
     "hpp": (
         "Now, generate ONLY the .hpp header file for the Python code above.\n"
         "Do NOT include the .cpp implementation or the _SIL.cpp file — output the header file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Do not describe what you will generate. Just output the header file code directly to stdout."
+        + _COMMON_SUFFIX
     ),
     "cpp": (
         "Now, generate ONLY the .cpp implementation file for the Python code above.\n"
         "Do NOT include the .hpp header or the _SIL.cpp file — output the implementation file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Do not describe what you will generate. Just output the implementation file code directly to stdout."
+        + _COMMON_SUFFIX
     ),
     "sil": (
         "Now, generate ONLY the _SIL.cpp Pybind11 Software-In-the-Loop file for the Python code above.\n"
         "Do NOT include the .hpp header or the .cpp implementation — output the _SIL.cpp file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Do not describe what you will generate. Just output the SIL file code directly to stdout."
+        + _COMMON_SUFFIX
     ),
 }
+
+_DIFF_SUFFIX = (
+    "If no changes are required for this file, output:\n"
+    '{"modified": false, "code": ""}\n'
+    "If changes are required, output the complete updated file:\n"
+    + _COMMON_SUFFIX
+)
 
 # Prompts for diff-based (incremental) update: used when the .py file was modified
 # and the corresponding C++ files already exist.
@@ -115,24 +128,21 @@ _FILE_TYPE_SUFFIX_DIFF = {
         "Update ONLY the .hpp header file to reflect those Python changes.\n"
         "Keep all existing C++ code that was NOT affected by the Python changes.\n"
         "Do NOT include the .cpp implementation or the _SIL.cpp file — output the header file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Just output the complete updated header file code directly to stdout."
+        + _DIFF_SUFFIX
     ),
     "cpp": (
         "The Python source file has been modified. The git diff shown above indicates exactly what changed.\n"
         "Update ONLY the .cpp implementation file to reflect those Python changes.\n"
         "Keep all existing C++ code that was NOT affected by the Python changes.\n"
         "Do NOT include the .hpp header or the _SIL.cpp file — output the implementation file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Just output the complete updated implementation file code directly to stdout."
+        + _DIFF_SUFFIX
     ),
     "sil": (
         "The Python source file has been modified. The git diff shown above indicates exactly what changed.\n"
         "Update ONLY the _SIL.cpp Pybind11 Software-In-the-Loop file to reflect those Python changes.\n"
         "Keep all existing C++ code that was NOT affected by the Python changes.\n"
         "Do NOT include the .hpp header or the .cpp implementation — output the _SIL.cpp file only.\n"
-        "Output ONLY raw C++ code. No explanations, no markdown fences, no preamble, no summary.\n"
-        "Just output the complete updated SIL file code directly to stdout."
+        + _DIFF_SUFFIX
     ),
 }
 
@@ -188,29 +198,43 @@ def cmd_prompt(args: argparse.Namespace) -> None:
 
 
 def cmd_filter_cpp(args: argparse.Namespace) -> None:
-    """Filter Copilot CLI stdout to retain only valid C++ code.
+    """Parse JSON output from Copilot CLI and write C++ code if modified.
 
-    The Copilot CLI sometimes writes tool-call logs and status messages
-    (lines starting with '✗', '●', shell commands, etc.) to stdout before
-    the actual generated code.  This command reads stdin, discards every
-    line that precedes the first recognisable C++ line, and strips any
-    remaining Markdown code-fence lines (```...).
+    Expects JSON on stdin:
+      {"modified": true,  "code": "<C++ source>"}
+      {"modified": false, "code": ""}
+
+    When modified is false the output file is left untouched.
+    When modified is true the decoded code is written to --output (or stdout).
     """
-    cpp_start_re = re.compile(
-        r'^(#|//|/\*|class\b|struct\b|namespace\b|template\b|typedef\b|using\b)'
-    )
-    fence_re = re.compile(r'^```')
+    raw = sys.stdin.read()
 
-    lines = sys.stdin.readlines()
-    start = next(
-        (i for i, line in enumerate(lines) if cpp_start_re.match(line)),
-        None,
-    )
-    if start is None:
+    # Strip markdown code fences the model might wrap around the JSON
+    raw = re.sub(r'```(?:json)?\n?', '', raw).strip()
+
+    # Skip any leading noise (status lines, etc.) before the JSON object
+    start = raw.find('{')
+    if start == -1:
         return
-    for line in lines[start:]:
-        if not fence_re.match(line):
-            sys.stdout.write(line)
+    raw = raw[start:]
+
+    decoder = json.JSONDecoder()
+    try:
+        data, _ = decoder.raw_decode(raw)
+    except json.JSONDecodeError:
+        return
+
+    if not data.get("modified", True):
+        # No changes needed — leave the output file untouched
+        return
+
+    code = data.get("code", "")
+    output_path = getattr(args, "output", None)
+    if output_path:
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(code)
+    else:
+        sys.stdout.write(code)
 
 
 def cmd_pr_body(args: argparse.Namespace) -> None:
@@ -279,7 +303,11 @@ def main() -> None:
     # filter-cpp  (reads from stdin)
     p_filter = sub.add_parser(
         "filter-cpp",
-        help="Filter Copilot CLI output from stdin, writing only C++ code to stdout.",
+        help="Parse JSON output from Copilot CLI and write C++ code if modified.",
+    )
+    p_filter.add_argument(
+        "--output", dest="output", default=None,
+        help="Path to write the C++ output file. If not specified, writes to stdout."
     )
     p_filter.set_defaults(func=cmd_filter_cpp)
 

@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: ''
+      submodules:
+        description: 'Whether to checkout submodules. Use "recursive" for recursive checkout, "true" for non-recursive, or "false" to skip. Defaults to "recursive".'
+        required: false
+        type: string
+        default: 'recursive'
     secrets:
       COPILOT_GITHUB_TOKEN:
         required: true
@@ -32,7 +37,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          submodules: recursive
+          submodules: ${{ inputs.submodules || 'false' }}
 
       - name: Get changed Python files
         id: changed-files
@@ -136,7 +141,7 @@ jobs:
             HPP_EXISTING_ARGS=""
             if [ -f "$HPP_FILE" ]; then HPP_EXISTING_ARGS="--hpp-file $HPP_FILE"; fi
             python3 "$SCRIPT" prompt "$py_file" hpp $HPP_EXISTING_ARGS $PY_DIFF_ARGS > /tmp/prompt_hpp.txt
-            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_hpp.txt)" | python3 "$SCRIPT" filter-cpp > "$HPP_FILE"
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_hpp.txt)" | python3 "$SCRIPT" filter-cpp --output "$HPP_FILE"
 
             # Generate .cpp source file (informed by the newly generated .hpp).
             # Also pass the existing .cpp (if any) so the AI can update only changed parts.
@@ -144,13 +149,13 @@ jobs:
             if [ -f "$CPP_FILE" ]; then CPP_EXISTING_ARGS="--cpp-file $CPP_FILE"; fi
             python3 "$SCRIPT" prompt "$py_file" cpp \
               --hpp-file "$HPP_FILE" $CPP_EXISTING_ARGS $PY_DIFF_ARGS > /tmp/prompt_cpp.txt
-            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_cpp.txt)" | python3 "$SCRIPT" filter-cpp > "$CPP_FILE"
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_cpp.txt)" | python3 "$SCRIPT" filter-cpp --output "$CPP_FILE"
 
             # Generate _SIL.cpp Pybind11 file (informed by the newly generated .hpp and .cpp)
             python3 "$SCRIPT" prompt "$py_file" sil \
               --hpp-file "$HPP_FILE" \
               --cpp-file "$CPP_FILE" $PY_DIFF_ARGS > /tmp/prompt_sil.txt
-            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_sil.txt)" | python3 "$SCRIPT" filter-cpp > "$SIL_FILE"
+            copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_sil.txt)" | python3 "$SCRIPT" filter-cpp --output "$SIL_FILE"
 
             echo "Generated: $HPP_FILE"
             echo "Generated: $CPP_FILE"
