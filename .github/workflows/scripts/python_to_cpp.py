@@ -110,6 +110,8 @@ _FILE_TYPE_SUFFIX_FULL = {
     "sil": (
         "Now, generate ONLY the _SIL.cpp Pybind11 Software-In-the-Loop file for the Python code above.\n"
         "Do NOT include the .hpp header or the .cpp implementation — output the _SIL.cpp file only.\n"
+        "IMPORTANT: Only create wrapper functions for methods that are explicitly defined in the Python class (e.g. def method_name). "
+        "Do NOT create any additional convenience functions such as getters, setters, or reset functions that do not exist as methods in the Python source code.\n"
         + _COMMON_SUFFIX
     ),
 }
@@ -143,6 +145,8 @@ _FILE_TYPE_SUFFIX_DIFF = {
         "Update ONLY the _SIL.cpp Pybind11 Software-In-the-Loop file to reflect those Python changes.\n"
         "Keep all existing C++ code that was NOT affected by the Python changes.\n"
         "Do NOT include the .hpp header or the .cpp implementation — output the _SIL.cpp file only.\n"
+        "IMPORTANT: Only keep wrapper functions for methods that are explicitly defined in the Python class (e.g. def method_name). "
+        "Remove any convenience functions such as getters, setters, or reset functions that do not exist as methods in the Python source code.\n"
         + _DIFF_SUFFIX
     ),
 }
