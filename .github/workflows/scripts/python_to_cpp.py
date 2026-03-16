@@ -8,7 +8,7 @@ the AI model and prompts without touching the workflow YAML.
 Usage (called from the workflow YAML):
   python3 python_to_cpp.py branch-name <current_branch>
   python3 python_to_cpp.py model
-  python3 python_to_cpp.py prompt <py_file> {hpp,cpp,sil} [--hpp-file ...] [--cpp-file ...] [--py-diff-file ...]
+  python3 python_to_cpp.py prompt <py_file> {hpp,cpp,sil} [--hpp-file ...] [--cpp-file ...] [--sil-file ...] [--py-diff-file ...]
   python3 python_to_cpp.py filter-cpp
   python3 python_to_cpp.py pr-body <file1> [<file2> ...]
 """
@@ -172,6 +172,13 @@ def cmd_prompt(args: argparse.Namespace) -> None:
                 "from the Python code above. Use it as the basis for your output:\n"
                 f"```cpp\n{f.read()}\n```"
             )
+    if getattr(args, "sil_file", None) and os.path.isfile(args.sil_file):
+        with open(args.sil_file, encoding="utf-8") as f:
+            already_generated += (
+                "\n\nThe following _SIL.cpp Pybind11 file has already been generated "
+                "from the Python code above. Use it as the basis for your output:\n"
+                f"```cpp\n{f.read()}\n```"
+            )
 
     # Diff-based update mode: include the Python diff and instruct the AI to
     # update only the affected C++ sections.
@@ -293,6 +300,9 @@ def main() -> None:
     p_prompt.add_argument(
         "--cpp-file", dest="cpp_file", default=None,
         help="Path to the already-generated .cpp file to include in the prompt (used for cpp/sil).")
+    p_prompt.add_argument(
+        "--sil-file", dest="sil_file", default=None,
+        help="Path to the already-generated _SIL.cpp file to include in the prompt (used for sil).")
     p_prompt.add_argument(
         "--py-diff-file", dest="py_diff_file", default=None,
         help="Path to a file containing the git diff of the Python source file. "

@@ -152,9 +152,11 @@ jobs:
             copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_cpp.txt)" | python3 "$SCRIPT" filter-cpp --output "$CPP_FILE"
 
             # Generate _SIL.cpp Pybind11 file (informed by the newly generated .hpp and .cpp)
+            SIL_EXISTING_ARGS=""
+            if [ -f "$SIL_FILE" ]; then SIL_EXISTING_ARGS="--sil-file $SIL_FILE"; fi
             python3 "$SCRIPT" prompt "$py_file" sil \
               --hpp-file "$HPP_FILE" \
-              --cpp-file "$CPP_FILE" $PY_DIFF_ARGS > /tmp/prompt_sil.txt
+              --cpp-file "$CPP_FILE" $SIL_EXISTING_ARGS $PY_DIFF_ARGS > /tmp/prompt_sil.txt
             copilot --model "$COPILOT_MODEL" -p "$(cat /tmp/prompt_sil.txt)" | python3 "$SCRIPT" filter-cpp --output "$SIL_FILE"
 
             echo "Generated: $HPP_FILE"
