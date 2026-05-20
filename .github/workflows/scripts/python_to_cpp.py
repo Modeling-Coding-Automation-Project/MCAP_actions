@@ -368,6 +368,10 @@ def main() -> None:
     p_pr.add_argument("files", nargs="+", help="List of changed Python files.")
     p_pr.set_defaults(func=cmd_pr_body)
 
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(0)
+
     args = parser.parse_args()
     args.func(args)
 
