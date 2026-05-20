@@ -29,6 +29,7 @@ If you want to write control algorithms such as Python Control (python-control),
 Write the include code in header files.
 
 `python_control.hpp` includes the following headers internally:
+
 - `python_control_kalman_filter.hpp` — Linear/Extended/Unscented Kalman Filters
 - `python_control_least_squares.hpp` — Least Squares / Recursive Least Squares
 - `python_control_lqr.hpp` — LQR / LQI controllers
